@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Điều khiển Bầu Cua</title>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; background: #141414; color: #fff; margin: 0; padding: 16px; }
+  h1 { text-align: center; margin: 8px 0 4px; }
+  .sub { text-align: center; color: #aaa; margin-bottom: 16px; }
+  .toolbar { max-width: 1100px; margin: 0 auto 12px; background: #1e1e1e; border-radius: 12px; padding: 14px;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
+  .stats { width: 100%; text-align: center; color: #ccc; margin-bottom: 4px; }
+  .stats b { color: #2ecc71; }
+  button { padding: 8px 14px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; color: #111; }
+  button:disabled { opacity: .3; cursor: not-allowed; }
+  .green { background: #2ecc71; } .red { background: #e74c3c; color: #fff; }
+  .blue { background: #3498db; color: #fff; } .orange { background: #f39c12; }
+  .gray { background: #555; color: #fff; }
+  input[type=text] { padding: 8px 12px; border-radius: 8px; border: 1px solid #444; background: #222; color: #fff; min-width: 200px; }
+  select { padding: 8px; border-radius: 8px; background: #222; color: #fff; border: 1px solid #444; }
+  .grid { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+  .card { background: #1e1e1e; border-radius: 14px; padding: 16px; border: 2px solid #333; }
+  .card.dang-dieu-khien { border-color: #2ecc71; }
+  .card h3 { margin: 0 0 2px; }
+  .card .id { color: #888; font-size: 12px; word-break: break-all; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 13px; font-weight: bold; }
+  .online { background: #14532d; color: #4ade80; } .offline { background: #450a0a; color: #f87171; }
+  .seen { color: #888; font-size: 12px; }
+  .row { margin: 10px 0; }
+  .big-toggle { width: 100%; font-size: 16px; padding: 12px; }
+  .hint { font-size: 12px; color: #999; }
+  .animal-row { display: flex; align-items: center; justify-content: space-between; background: #262626;
+    border-radius: 8px; padding: 6px 10px; margin: 5px 0; }
+  .animal-row .ten { font-size: 17px; }
+  .stepper button { padding: 4px 10px; font-size: 15px; }
+  .stepper span { display: inline-block; min-width: 26px; text-align: center; font-size: 16px; font-weight: bold; }
+  .preset { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .preset button { font-size: 13px; padding: 6px 9px; }
+  .section-title { margin: 12px 0 4px; color: #fbbf24; font-weight: bold; }
+  hr { border: 1px solid #333; }
+</style>
+</head>
+<body>
+
+<h1>🎲 Điều khiển Bầu Cua</h1>
+<div class="sub">Bật điều khiển → máy đó ra kết quả theo ý bạn &nbsp;|&nbsp; Tắt → máy đó random tự nhiên</div>
+
+<div class="toolbar">
+  <div class="stats" id="stats">Đang tải...</div>
+  <button class="green" onclick="dieuKhienTatCa(true)">✅ Bật điều khiển TẤT CẢ</button>
+  <button class="red" onclick="dieuKhienTatCa(false)">🚫 Tắt điều khiển TẤT CẢ</button>
+  <button class="gray" onclick="xoaMayOffline()">🧹 Xóa máy offline</button>
+  <input type="text" id="timkiem" placeholder="🔍 Tìm tên máy..." oninput="veLai()">
+  <select id="loc" onchange="veLai()">
+    <option value="all">Tất cả máy</option>
+    <option value="online">Chỉ máy online</option>
+    <option value="offline">Chỉ máy offline</option>
+  </select>
+</div>
+
+<div class="grid" id="danhsach"></div>
+
+<script>
+// ---- Firebase (lấy sẵn từ google-services.json của app) ----
+var firebaseConfig = {
+  apiKey: "AIzaSyCkDNt9x0nOG-aHNNtTIsSgzM4OkqAXptA",
+  authDomain: "baucaua-ad1e1.firebaseapp.com",
+  databaseURL: "https://baucaua-ad1e1-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "baucaua-ad1e1"
+};
+firebase.initializeApp(firebaseConfig);
+var db = firebase.database();
+var refMay = db.ref("devices");
+
+// Thứ tự PHẢI khớp code game (bauCuaSprites): 0 Cá, 1 Cua, 2 Tôm, 3 Gà, 4 Bầu, 5 Nai
+var conVat = ["🐟 Cá", "🦀 Cua", "🦐 Tôm", "🐓 Gà", "🎃 Bầu", "🦌 Nai"];
+var duLieuMoiNhat = {};
+
+refMay.on("value", function(snap) {
+  duLieuMoiNhat = snap.val() || {};
+  veLai();
+});
+
+function veLai() {
+  var hop = document.getElementById("danhsach");
+  var tuKhoa = (document.getElementById("timkiem").value || "").toLowerCase();
+  var cheDoLoc = document.getElementById("loc").value;
+  hop.innerHTML = "";
+  var tong = 0, dangOnline = 0;
+
+  Object.keys(duLieuMoiNhat).forEach(function(id) {
+    var d = duLieuMoiNhat[id] || {};
+    tong++;
+    if (d.online) dangOnline++;
+    var ten = d.name ? d.name : id;
+    if (tuKhoa && ten.toLowerCase().indexOf(tuKhoa) < 0) return;
+    if (cheDoLoc === "online" && !d.online) return;
+    if (cheDoLoc === "offline" && d.online) return;
+    hop.appendChild(taoThe(id, d, ten));
+  });
+
+  document.getElementById("stats").innerHTML =
+    "🟢 Online: <b>" + dangOnline + "</b> / " + tong + " máy" +
+    (tong === 0 ? " — chưa có máy nào mở app" : "");
+  if (tong === 0) hop.innerHTML = "<p style='color:#888'>Mở app trên điện thoại để máy hiện ở đây.</p>";
+}
+
+function gioXem(lastSeen) {
+  if (!lastSeen) return "";
+  var diff = Date.now() - lastSeen;
+  if (diff < 0) diff = 0;
+  var phut = Math.floor(diff / 60000);
+  if (phut < 1) return "mới truy cập";
+  if (phut < 60) return phut + " phút trước";
+  return Math.floor(phut / 60) + " giờ trước";
+}
+
+// Ping kieu FPS: xanh <200ms, vang <500ms, do còn lại
+function pingHtml(d) {
+  if (d.pingMs === undefined || d.pingMs === null || d.pingMs < 0)
+    return "<span class='badge offline'>📶 Ping: --</span>";
+  var lop = d.pingMs < 200 ? "online" : (d.pingMs < 500 ? "" : "offline");
+  var mau = d.pingMs < 200 ? "" : (d.pingMs < 500 ? " style='background:#422006;color:#fbbf24'" : "");
+  return "<span class='badge " + lop + "'" + mau + ">📶 Ping: " + d.pingMs + "ms</span>";
+}
+
+function taoThe(id, d, ten) {
+  var dangDieuKhien = !!d.useAppLogic;
+  var nangCao = !!d.advancedEnabled;
+  var the = document.createElement("div");
+  the.className = "card" + (dangDieuKhien ? " dang-dieu-khien" : "");
+
+  var html = "<h3>" + ten + "</h3>";
+  html += "<div class='id'>" + id + "</div>";
+  html += "<p><span class='badge " + (d.online ? "online" : "offline") + "'>" +
+    (d.online ? "🟢 Online" : "🔴 Offline") + "</span> " +
+    "<span class='seen'>" + gioXem(d.lastSeen) + "</span> " + pingHtml(d) + "</p>";
+
+  // Công tắc chính
+  html += "<div class='row'><button class='big-toggle " + (dangDieuKhien ? "red" : "green") + "'" +
+    " onclick=\"batTat('" + id + "','useAppLogic'," + dangDieuKhien + ")\">" +
+    (dangDieuKhien ? "🚫 TẮT điều khiển máy này" : "✅ BẬT điều khiển máy này") + "</button></div>";
+
+  if (!dangDieuKhien) {
+    html += "<div class='hint'>Máy đang random tự nhiên. Bật lên mới ép/chặn được.</div>";
+  } else {
+    // Chế độ nâng cao
+    html += "<div class='row'><button class='" + (nangCao ? "orange" : "gray") + "'" +
+      " onclick=\"batTat('" + id + "','advancedEnabled'," + nangCao + ")\">" +
+      "⚙️ Ép / Chặn chi tiết: " + (nangCao ? "ĐANG BẬT" : "đang tắt") + "</button></div>";
+    html += "<div class='hint'>Tắt = game tự tính theo quy luật 20 phút. Bật = ép/chặn bên dưới mới có tác dụng.</div>";
+
+    if (nangCao) {
+      // Nút ép nhanh
+      html += "<div class='section-title'>⚡ Ép nhanh 3 con giống nhau</div><div class='preset'>";
+      for (var i = 0; i < 6; i++)
+        html += "<button class='blue' onclick=\"epNhanh('" + id + "'," + i + ")\">" + conVat[i] + "</button>";
+      html += "</div>";
+
+      // Ép số lượng từng con
+      html += "<div class='section-title'>🎯 Ép số lượng từng con (0–3)</div>";
+      for (var i = 0; i < 6; i++) {
+        var sl = d["forceCount_" + i] || 0;
+        html += "<div class='animal-row'><span class='ten'>" + conVat[i] + "</span>" +
+          "<span class='stepper'>" +
+          "<button class='gray' onclick=\"doiSoLuong('" + id + "'," + i + ",-1)\">−</button>" +
+          "<span>" + sl + "</span>" +
+          "<button class='gray' onclick=\"doiSoLuong('" + id + "'," + i + ",1)\">+</button>" +
+          "</span></div>";
+      }
+
+      // Chặn từng con
+      html += "<div class='section-title'>🚫 Chặn con không cho ra</div><div class='preset'>";
+      for (var i = 0; i < 6; i++) {
+        var dangChan = d["blockAnimal_" + i] || false;
+        html += "<button class='" + (dangChan ? "red" : "green") + "'" +
+          " onclick=\"batTat('" + id + "','blockAnimal_" + i + "'," + dangChan + ")\">" +
+          conVat[i] + (dangChan ? " ⛔" : " ✓") + "</button>";
+      }
+      html += "</div>";
+
+      html += "<div class='row'><button class='gray' onclick=\"xaHet('" + id + "')\">↩️ Xả hết ép/chặn</button></div>";
+      html += "<div class='hint'>Ép/chặn tự xả sau mỗi ván. Tổng số con ép không nên quá 3.</div>";
+    }
+  }
+
+  html += "<hr><button class='red' onclick=\"xoaMay('" + id + "','" + ten + "')\">🗑️ Xóa máy</button>";
+  the.innerHTML = html;
+  return the;
+}
+
+// ---- Các thao tác Firebase ----
+function batTat(id, truong, dangBat) {
+  var capNhat = {};
+  capNhat[truong] = !dangBat;
+  db.ref("devices/" + id).update(capNhat);
+}
+function doiSoLuong(id, i, delta) {
+  var hienTai = (duLieuMoiNhat[id] && duLieuMoiNhat[id]["forceCount_" + i]) || 0;
+  var moi = Math.min(3, Math.max(0, hienTai + delta));
+  var capNhat = {};
+  capNhat["forceCount_" + i] = moi;
+  db.ref("devices/" + id).update(capNhat);
+}
+function epNhanh(id, i) {
+  var capNhat = {};
+  for (var k = 0; k < 6; k++) capNhat["forceCount_" + k] = (k === i ? 3 : 0);
+  for (var k = 0; k < 6; k++) capNhat["blockAnimal_" + k] = false;
+  db.ref("devices/" + id).update(capNhat);
+}
+function xaHet(id) {
+  var capNhat = {};
+  for (var k = 0; k < 6; k++) { capNhat["forceCount_" + k] = 0; capNhat["blockAnimal_" + k] = false; }
+  db.ref("devices/" + id).update(capNhat);
+}
+function dieuKhienTatCa(bat) {
+  if (!confirm(bat ? "Bật điều khiển TẤT CẢ máy?" : "Tắt điều khiển TẤT CẢ máy (về random)?")) return;
+  Object.keys(duLieuMoiNhat).forEach(function(id) {
+    db.ref("devices/" + id).update({ useAppLogic: bat });
+  });
+}
+function xoaMay(id, ten) {
+  if (confirm("Xóa máy \"" + ten + "\" khỏi danh sách?")) db.ref("devices/" + id).remove();
+}
+function xoaMayOffline() {
+  var ds = Object.keys(duLieuMoiNhat).filter(function(id) { return !duLieuMoiNhat[id].online; });
+  if (ds.length === 0) { alert("Không có máy offline nào."); return; }
+  if (!confirm("Xóa " + ds.length + " máy offline?")) return;
+  ds.forEach(function(id) { db.ref("devices/" + id).remove(); });
+}
+</script>
+
+</body>
+</html>
